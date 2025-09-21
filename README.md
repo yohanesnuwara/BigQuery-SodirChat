@@ -8,13 +8,18 @@ Chat interface to Sodir Norwegian oil database using **Google BigQuery** and Gem
 
 ## Features
 
-- � **BigQuery-Powered**: All data stored and processed in BigQuery tables with native vector search
-- �🛢️ **Semantic Search**: Vector embeddings stored directly in BigQuery for high-performance similarity search
+- 🐘 **BigQuery-Powered**: All data stored and processed in BigQuery tables with native vector search
+- 🗂️ **Semantic Search**: Vector embeddings stored directly in BigQuery for high-performance similarity search
 - 🤖 **AI Chat Interface**: Powered by Google Gemini 2.5 Flash with BigQuery vector retrieval
-- � **Scalable Architecture**: Handles large petroleum datasets using BigQuery's distributed processing
+- 🏗️ **Scalable Architecture**: Handles large petroleum datasets using BigQuery's distributed processing
 - 🔍 **Smart Context**: Auto-adjusts search strategy based on query intent using BigQuery ML
 - 📊 **Dual Search**: Searches both text documents and images stored as BigQuery tables
 - 📈 **Interactive UI**: Built with Streamlit for easy exploration of BigQuery results
+
+<div align="center">
+  <img src="static/sodirchat-ui.png" alt="SodirChat User Interface" width="800"/>
+  <p><em>SodirChat app</em></p>
+</div>
 
 ## BigQuery Architecture
 
