@@ -11,5 +11,6 @@ dependencies = [
     "google-cloud-bigquery-storage>=2.33.1",
     "pandas>=2.3.2",
     "pyarrow>=21.0.0",
+    "streamlit>=1.49.1",
     "tqdm>=4.67.1",
 ]
