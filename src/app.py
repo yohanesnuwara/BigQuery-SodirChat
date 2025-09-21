@@ -90,6 +90,7 @@ def render_img_answer(hits: pd.DataFrame, limit: int = 30) -> str:
             fn  = _s(r.get("filename"))
             url = _s(r.get("url"))
             label = f"- {typ} {fn}".strip()
+            # keep raw URL list here or switch to numeric too if you prefer
             lines.append(f"{label} {url}")
         lines.append("")
     return "\n".join(lines).strip()
@@ -148,7 +149,35 @@ def run_vector_search(q_emb: List[float], user_q: str, top_k_total: int) -> pd.D
         )
         return job.result().to_dataframe(create_bqstorage_client=True)
 
-# ================= LLM SYNTHESIS (for non-image queries) =================
+# ================= CITATIONS: COLLECT & RENDER =================
+def collect_sources(hits: pd.DataFrame, max_refs: int = 8) -> List[str]:
+    """Ordered unique doc URLs from hits (prefer docs over imgs)."""
+    urls: List[str] = []
+    # docs first (better textual grounding)
+    for _, r in hits[hits["source"] == "docs"].iterrows():
+        u = _s(r.get("url"))
+        if u and u not in urls:
+            urls.append(u)
+        if len(urls) >= max_refs:
+            return urls
+    # then images if we still have room
+    for _, r in hits[hits["source"] == "imgs"].iterrows():
+        u = _s(r.get("url"))
+        if u and u not in urls:
+            urls.append(u)
+        if len(urls) >= max_refs:
+            break
+    return urls
+
+def render_references(urls: List[str]) -> str:
+    if not urls:
+        return ""
+    lines = ["**References**"]
+    for i, u in enumerate(urls, start=1):
+        lines.append(f"[{i}] {u}")
+    return "\n\n".join(lines)
+
+# ================= LLM SYNTHESIS (numeric [n] citations) =================
 def _strip_empty_bullets(md: str) -> str:
     cleaned = []
     for line in (md or "").splitlines():
@@ -161,43 +190,50 @@ def _strip_empty_bullets(md: str) -> str:
 def build_context(hits_df: pd.DataFrame, max_chunk_chars=1600, max_total_chars=15000) -> str:
     pieces = []
     for _, r in hits_df.iterrows():
-        url = _s(r.get("url"))
+        # NOTE: keep URLs out of body; they will be in the Sources list
         title = _s(r.get("title"))
         content = _s(r.get("content"))[:max_chunk_chars]
-        pieces.append(f"URL: {url}\nTITLE: {title}\nTEXT: {content}")
+        pieces.append(f"TITLE: {title}\nTEXT: {content}")
     ctx = "\n\n---\n\n".join(pieces)
     return ctx[:max_total_chars]
 
 def synthesize_answer(question: str, hits_df: pd.DataFrame,
+                      sources: List[str],
                       max_chunk_chars: int, max_total_chars: int,
                       max_output_tokens: int) -> str:
     from vertexai.generative_models import Part
     ctx = build_context(hits_df, max_chunk_chars=max_chunk_chars, max_total_chars=max_total_chars)
 
-    # More guided prompt for reservoir-style Qs
+    # numbered sources block
+    src_block = "\n".join([f"[{i}] {u}" for i, u in enumerate(sources, start=1)]) or "(none)"
+
     reservoir_hint = ""
     if extract_wellname(question):
         reservoir_hint = (
             "- If the context includes reservoir info for that well, summarize formation(s), "
             "depths (MD/TVD where available), lithology, fluids, tests (DST), porosity/permeability, "
-            "and any notable results. Keep it compact but cover key numbers.\n"
+            "and notable results. Keep key numbers. Use numeric citations like [1], [2].\n"
         )
 
     system = (
-        "You are a petroleum data analyst. Answer using ONLY the provided context. "
-        "If the answer isn't in the context, say you don't know."
+        "You are a petroleum data analyst. Answer using ONLY the provided context and the Sources list. "
+        "Do NOT paste URLs in the answer body. Cite with numeric markers [1], [2], ... that map to the Sources list."
     )
     prompt = f"""{system}
 
 Question:
 {question}
 
-Context:
+Context (snippets):
 {ctx}
 
+Sources (for numeric citations):
+{src_block}
+
 Instructions:
-- Cite URLs inline by pasting the URL after the fact it supports.
-{reservoir_hint}- Prefer bullet points, but avoid empty bullets.
+- Use [n] citations that refer to the Sources above (e.g., '[1]' for source 1).
+- No inline URLs in the body; we'll show 'References' separately.
+{reservoir_hint}- Prefer bullet points, avoid empty bullets.
 """
 
     model = _gemini_model()
@@ -271,19 +307,26 @@ if user_q:
                 render_hits(hits, show_snippets=show_snippets)
 
                 if wants_imgs(user_q):
+                    # Image answers still show URLs inline (can also switch to numeric if you prefer)
                     answer_text = render_img_answer(hits)
                     st.subheader("Answer")
                     st.markdown(answer_text)
                 elif DO_SYNTH:
                     with st.spinner("Synthesizing concise answer…"):
+                        sources = collect_sources(hits, max_refs=8)
                         answer_text = synthesize_answer(
-                            user_q, hits,
+                            user_q, hits, sources,
                             max_chunk_chars=max_chunk_chars,
                             max_total_chars=max_total_chars,
                             max_output_tokens=answer_tokens,
                         )
                         st.subheader("Answer")
                         st.markdown(answer_text or "_(empty)_")
+
+                        # Show the numbered references below the answer
+                        refs_md = render_references(sources)
+                        if refs_md:
+                            st.markdown(refs_md)
                 else:
                     answer_text = ""
 
